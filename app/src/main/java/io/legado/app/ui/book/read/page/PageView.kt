@@ -6,7 +6,6 @@ import android.view.LayoutInflater
 import android.widget.FrameLayout
 import androidx.core.view.isGone
 import androidx.core.view.isInvisible
-import io.legado.app.R
 import io.legado.app.constant.AppConst.timeFormat
 import io.legado.app.data.entities.Bookmark
 import io.legado.app.databinding.ViewBookPageBinding
@@ -17,7 +16,10 @@ import io.legado.app.ui.book.read.ReadBookActivity
 import io.legado.app.ui.book.read.page.entities.TextPage
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.ui.widget.BatteryView
-import io.legado.app.utils.*
+import io.legado.app.utils.activity
+import io.legado.app.utils.dpToPx
+import io.legado.app.utils.statusBarHeight
+import io.legado.app.utils.visible
 import splitties.views.backgroundColor
 import java.util.*
 
@@ -49,8 +51,6 @@ class PageView(context: Context) : FrameLayout(context) {
 
     init {
         if (!isInEditMode) {
-            //设置背景防止切换背景时文字重叠
-            setBackgroundColor(context.getCompatColor(R.color.background))
             upStyle()
         }
         binding.contentTextView.upView = {
@@ -202,7 +202,11 @@ class PageView(context: Context) : FrameLayout(context) {
     }
 
     fun upBg() {
-        binding.vwRoot.backgroundColor = ReadBookConfig.bgMeanColor
+        if (ReadBookConfig.bgAlpha < 100) {
+            binding.vwRoot.backgroundColor = ReadBookConfig.bgMeanColor
+        } else {
+            binding.vwRoot.background = null
+        }
         binding.vwBg.background = ReadBookConfig.bg
         upBgAlpha()
     }
@@ -294,8 +298,8 @@ class PageView(context: Context) : FrameLayout(context) {
         binding.contentTextView.selectEndMoveIndex(relativePagePos, lineIndex, charIndex)
     }
 
-    fun cancelSelect() {
-        binding.contentTextView.cancelSelect()
+    fun cancelSelect(fromSearchExit: Boolean = false) {
+        binding.contentTextView.cancelSelect(fromSearchExit)
     }
 
     fun createBookmark(): Bookmark? {
@@ -306,7 +310,9 @@ class PageView(context: Context) : FrameLayout(context) {
         return binding.contentTextView.relativePage(relativePagePos)
     }
 
+    val textPage get() = binding.contentTextView.textPage
+
     val selectedText: String get() = binding.contentTextView.getSelectedText()
 
-    val textPage get() = binding.contentTextView.textPage
+    val selectStartPos get() = binding.contentTextView.selectStart
 }

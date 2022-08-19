@@ -26,6 +26,7 @@ data class TextPage(
 
     val lineSize get() = textLines.size
     val charSize get() = text.length
+    var isMsgPage: Boolean = false
 
     fun getLine(index: Int): TextLine {
         return textLines.getOrElse(index) {
@@ -33,6 +34,9 @@ data class TextPage(
         }
     }
 
+    /**
+     * 底部对齐更新行位置
+     */
     fun upLinesPosition() {
         if (!ReadBookConfig.textBottomJustify) return
         if (textLines.size <= 1) return
@@ -76,9 +80,14 @@ data class TextPage(
         }
     }
 
+    /**
+     * 计算文字位置
+     */
     @Suppress("DEPRECATION")
     fun format(): TextPage {
-        if (textLines.isEmpty() && ChapterProvider.viewWidth > 0) {
+        if (textLines.isEmpty()) isMsgPage = true
+        if (isMsgPage && ChapterProvider.viewWidth > 0) {
+            textLines.clear()
             val visibleWidth = ChapterProvider.visibleRight - ChapterProvider.paddingLeft
             val layout = StaticLayout(
                 text, ChapterProvider.contentPaint, visibleWidth,
@@ -102,9 +111,7 @@ data class TextPage(
                     val cw = StaticLayout.getDesiredWidth(char, ChapterProvider.contentPaint)
                     val x1 = x + cw
                     textLine.textChars.add(
-                        TextChar(
-                            char, start = x, end = x1
-                        )
+                        TextChar(char, start = x, end = x1)
                     )
                     x = x1
                 }
@@ -115,6 +122,9 @@ data class TextPage(
         return this
     }
 
+    /**
+     * 移除朗读标志
+     */
     fun removePageAloudSpan(): TextPage {
         textLines.forEach { textLine ->
             textLine.isReadAloud = false
@@ -122,6 +132,10 @@ data class TextPage(
         return this
     }
 
+    /**
+     * 更新朗读标志
+     * @param aloudSpanStart 朗读文字开始位置
+     */
     fun upPageAloudSpan(aloudSpanStart: Int) {
         removePageAloudSpan()
         var lineStart = 0
@@ -148,6 +162,9 @@ data class TextPage(
         }
     }
 
+    /**
+     * 阅读进度
+     */
     val readProgress: String
         get() {
             val df = DecimalFormat("0.0%")
@@ -164,15 +181,24 @@ data class TextPage(
             return percent
         }
 
-    fun getSelectStartLength(lineIndex: Int, charIndex: Int): Int {
+    /**
+     * 根据行和列返回字符在本页的位置
+     * @param lineIndex 字符在第几行
+     * @param columnIndex 字符在第几列
+     * @return 字符在本页位置
+     */
+    fun getPosByLineColumn(lineIndex: Int, columnIndex: Int): Int {
         var length = 0
         val maxIndex = min(lineIndex, lineSize)
         for (index in 0 until maxIndex) {
             length += textLines[index].charSize
         }
-        return length + charIndex
+        return length + columnIndex
     }
 
+    /**
+     * @return 页面所在章节
+     */
     fun getTextChapter(): TextChapter? {
         ReadBook.curTextChapter?.let {
             if (it.position == chapterIndex) {

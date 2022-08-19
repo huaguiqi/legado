@@ -11,7 +11,9 @@ import io.legado.app.help.BookHelp
 import io.legado.app.help.ContentProcessor
 import io.legado.app.help.config.AppConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 
 class SearchContentViewModel(application: Application) : BaseViewModel(application) {
     var bookUrl: String = ""
@@ -35,11 +37,15 @@ class SearchContentViewModel(application: Application) : BaseViewModel(applicati
         }
     }
 
-    suspend fun searchChapter(query: String, chapter: BookChapter?): List<SearchResult> {
+    suspend fun searchChapter(
+        query: String,
+        chapter: BookChapter?
+    ): List<SearchResult> {
         val searchResultsWithinChapter: MutableList<SearchResult> = mutableListOf()
         if (chapter != null) {
             book?.let { book ->
                 val chapterContent = BookHelp.getContent(book, chapter)
+                coroutineContext.ensureActive()
                 if (chapterContent != null) {
                     //先搜索没有启用净化的正文
                     withContext(Dispatchers.IO) {
@@ -48,6 +54,7 @@ class SearchContentViewModel(application: Application) : BaseViewModel(applicati
                             2 -> ChineseUtils.s2t(chapter.title)
                             else -> chapter.title
                         }
+                        kotlin.coroutines.coroutineContext.ensureActive()
                         mContent = contentProcessor!!.getContent(
                             book, chapter, chapterContent,
                             chineseConvert = true,
@@ -57,6 +64,7 @@ class SearchContentViewModel(application: Application) : BaseViewModel(applicati
                     }
                     val positions = searchPosition(query)
                     positions.forEachIndexed { index, position ->
+                        coroutineContext.ensureActive()
                         val construct = getResultAndQueryIndex(mContent, position, query)
                         val result = SearchResult(
                             resultCountWithinChapter = index,
@@ -86,8 +94,9 @@ class SearchContentViewModel(application: Application) : BaseViewModel(applicati
                 index = mContent.indexOf(pattern)
             }
             while (index >= 0) {
+                coroutineContext.ensureActive()
                 position.add(index)
-                index = mContent.indexOf(pattern, index + 1)
+                index = mContent.indexOf(pattern, index + pattern.length)
             }
         }
         return position

@@ -107,7 +107,9 @@ object ReadBook : CoroutineScope by MainScope() {
 
     fun uploadProgress() {
         book?.let {
-            AppWebDav.uploadBookProgress(it)
+            Coroutine.async {
+                AppWebDav.uploadBookProgress(it)
+            }
         }
     }
 
@@ -115,6 +117,7 @@ object ReadBook : CoroutineScope by MainScope() {
         Coroutine.async {
             readRecord.readTime = readRecord.readTime + System.currentTimeMillis() - readStartTime
             readStartTime = System.currentTimeMillis()
+            readRecord.lastRead = System.currentTimeMillis()
             if (AppConfig.enableReadRecord) {
                 appDb.readRecordDao.insert(readRecord)
             }
@@ -128,10 +131,18 @@ object ReadBook : CoroutineScope by MainScope() {
         }
     }
 
-    fun moveToNextPage() {
-        durChapterPos = curTextChapter?.getNextPageLength(durChapterPos) ?: durChapterPos
-        callBack?.upContent()
-        saveRead()
+    fun moveToNextPage(): Boolean {
+        var hasNextPage = false
+        curTextChapter?.let {
+            val nextPagePos = it.getNextPageLength(durChapterPos)
+            if (nextPagePos >= 0) {
+                hasNextPage = true
+                durChapterPos = nextPagePos
+                callBack?.upContent()
+                saveRead()
+            }
+        }
+        return hasNextPage
     }
 
     fun moveToNextChapter(upContent: Boolean): Boolean {
@@ -307,8 +318,9 @@ object ReadBook : CoroutineScope by MainScope() {
         if (book != null && bookSource != null) {
             CacheBook.getOrCreate(bookSource, book).download(scope, chapter)
         } else if (book != null) {
+            val msg = if (book.isLocalBook()) "无内容" else "没有书源"
             contentLoadFinish(
-                book, chapter, "没有书源", resetPageOffset = resetPageOffset
+                book, chapter, "加载正文失败\n$msg", resetPageOffset = resetPageOffset
             ) {
                 success?.invoke()
             }
