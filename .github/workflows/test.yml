@@ -43,7 +43,7 @@ jobs:
     needs: prepare
     strategy:
       matrix:
-        product: [ app ]
+        product: [ app , google ]
         type: [ release, releaseA ]
       fail-fast: false
     runs-on: ubuntu-latest
