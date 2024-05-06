@@ -5,7 +5,6 @@ import android.webkit.WebSettings
 import androidx.annotation.Keep
 import cn.hutool.core.codec.Base64
 import cn.hutool.core.util.HexUtil
-import com.github.liuyueyi.quick.transfer.ChineseUtils
 import io.legado.app.constant.AppConst
 import io.legado.app.constant.AppConst.dateFormat
 import io.legado.app.constant.AppLog
@@ -21,8 +20,30 @@ import io.legado.app.help.source.SourceVerificationHelp
 import io.legado.app.model.Debug
 import io.legado.app.model.analyzeRule.AnalyzeUrl
 import io.legado.app.model.analyzeRule.QueryTTF
-import io.legado.app.utils.*
+import io.legado.app.utils.ArchiveUtils
+import io.legado.app.utils.ChineseUtils
+import io.legado.app.utils.EncoderUtils
+import io.legado.app.utils.EncodingDetect
+import io.legado.app.utils.FileUtils
+import io.legado.app.utils.GSON
+import io.legado.app.utils.HtmlFormatter
+import io.legado.app.utils.JsURL
+import io.legado.app.utils.MD5Utils
+import io.legado.app.utils.StringUtils
+import io.legado.app.utils.UrlUtil
 import io.legado.app.utils.compress.LibArchiveUtils
+import io.legado.app.utils.createFileReplace
+import io.legado.app.utils.externalCache
+import io.legado.app.utils.fromJsonObject
+import io.legado.app.utils.isAbsUrl
+import io.legado.app.utils.isContentScheme
+import io.legado.app.utils.isUri
+import io.legado.app.utils.longToastOnUi
+import io.legado.app.utils.readBytes
+import io.legado.app.utils.readText
+import io.legado.app.utils.stackTraceStr
+import io.legado.app.utils.toStringArray
+import io.legado.app.utils.toastOnUi
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -37,7 +58,10 @@ import java.io.FileOutputStream
 import java.net.URLEncoder
 import java.nio.charset.Charset
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
+import java.util.SimpleTimeZone
+import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
@@ -314,7 +338,6 @@ interface JsExtensions : JsEncodeUtils {
     /**
      * js实现重定向拦截,网络访问get
      */
-    @Suppress("UnnecessaryVariable")
     fun get(urlStr: String, headers: Map<String, String>): Connection.Response {
         val requestHeaders = if (getSource()?.enabledCookieJar == true) {
             headers.toMutableMap().apply { put(cookieJarHeader, "1") }
@@ -332,7 +355,6 @@ interface JsExtensions : JsEncodeUtils {
     /**
      * js实现重定向拦截,网络访问head,不返回Response Body更省流量
      */
-    @Suppress("UnnecessaryVariable")
     fun head(urlStr: String, headers: Map<String, String>): Connection.Response {
         val requestHeaders = if (getSource()?.enabledCookieJar == true) {
             headers.toMutableMap().apply { put(cookieJarHeader, "1") }
@@ -350,7 +372,6 @@ interface JsExtensions : JsEncodeUtils {
     /**
      * 网络访问post
      */
-    @Suppress("UnnecessaryVariable")
     fun post(urlStr: String, body: String, headers: Map<String, String>): Connection.Response {
         val requestHeaders = if (getSource()?.enabledCookieJar == true) {
             headers.toMutableMap().apply { put(cookieJarHeader, "1") }
@@ -747,22 +768,14 @@ interface JsExtensions : JsEncodeUtils {
             var qTTF = CacheManager.getQueryTTF(key)
             if (qTTF != null) return qTTF
             val font: ByteArray? = when {
-                str.isAbsUrl() -> {
-                    var x = CacheManager.getByteArray(key)
-                    if (x == null) {
-                        x = AnalyzeUrl(str, source = getSource()).getByteArray()
-                        CacheManager.put(key, x)
-                    }
-                    x
-                }
-
+                str.isAbsUrl() -> AnalyzeUrl(str, source = getSource()).getByteArray()
                 str.isContentScheme() -> Uri.parse(str).readBytes(appCtx)
                 str.startsWith("/storage") -> File(str).readBytes()
                 else -> base64DecodeToByteArray(str)
             }
             font ?: return null
             qTTF = QueryTTF(font)
-            CacheManager.put(key, qTTF)
+            CacheManager.put(key, qTTF) // debug注释掉
             return qTTF
         } catch (e: Exception) {
             AppLog.put("获取字体处理类出错", e)
@@ -778,21 +791,38 @@ interface JsExtensions : JsEncodeUtils {
     fun replaceFont(
         text: String,
         errorQueryTTF: QueryTTF?,
-        correctQueryTTF: QueryTTF?
+        correctQueryTTF: QueryTTF?,
+        filter: Boolean
     ): String {
         if (errorQueryTTF == null || correctQueryTTF == null) return text
         val contentArray = text.toStringArray() //这里不能用toCharArray,因为有些文字占多个字节
         contentArray.forEachIndexed { index, s ->
             val oldCode = s.codePointAt(0)
-            if (errorQueryTTF.inLimit(oldCode)) {
-                val glyf = errorQueryTTF.getGlyfByCode(oldCode)
-                val code = correctQueryTTF.getCodeByGlyf(glyf)
-                if (code != 0) {
-                    contentArray[index] = code.toChar().toString()
-                }
+            // 忽略正常的空白字符
+            if (errorQueryTTF.isBlankUnicode(oldCode)) {
+                return@forEachIndexed
+            }
+            val glyf = errorQueryTTF.getGlyfByUnicode(oldCode)
+            // 删除轮廓数据不存在的字符
+            if (filter && (glyf == null)) {
+                contentArray[index] = ""
+                return@forEachIndexed
+            }
+            // 使用轮廓数据反查Unicode
+            val code = correctQueryTTF.getUnicodeByGlyf(glyf)
+            if (code != 0) {
+                contentArray[index] = code.toChar().toString()
             }
         }
         return contentArray.joinToString("")
+    }
+
+    fun replaceFont(
+        text: String,
+        errorQueryTTF: QueryTTF?,
+        correctQueryTTF: QueryTTF?
+    ): String {
+        return replaceFont(text, errorQueryTTF, correctQueryTTF, false)
     }
 
 
